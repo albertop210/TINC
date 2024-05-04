@@ -530,7 +530,7 @@ pullAD_MUTECT2 = function(CHROM, POS, REF, ALT, FILTER, FORMAT, tumour, normal){
 #'
 #' @export
 #'
-#' @importFrom  purrr  pmap_dfr dplyr tidyr
+#' @importFrom  purrr  pmap_dfr
 #'
 #' @examples
 #' # not run
