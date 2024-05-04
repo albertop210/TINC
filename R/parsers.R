@@ -468,3 +468,104 @@ load_VCF_CNA_DRAGEN = function(file) {
   return(list(cna = SNVnADtAD, purity = purity))
 }
 
+# Allele depth pull function for Mutect2 TUMvsNOR
+#
+# @description Pulls out tumor and normal allele depths from
+# Mutect2 vcf columns
+#
+#
+# @param CHROM as CHROM in vcf
+# @param POS as POS in vcf
+# @param REF as REF in vcf
+# @param ALT as ALT in vcf
+# @param FILTER as FILTER in vcf
+# @param FORMAT as FORMAT in vcf
+# @param tumour as tumour in vcf
+# @param normal as normal in vcf
+#
+# @importFrom tibble tibble
+# 
+# @return Allele depths for normal and tumour
+#
+#
+# @examples
+# # not run
+pullAD_MUTECT2 = function(CHROM, POS, REF, ALT, FILTER, FORMAT, tumour, normal){
+  
+  #Identify ref and alt alleles
+  FORMAT_split = unlist(strsplit(FORMAT, ":"))
+  ADIndex = match("AD", FORMAT_split)
+  
+  #Pull ref and alt depths for normal and tumour
+  tumour = unlist(strsplit(tumour, ":"))
+  normal = unlist(strsplit(normal, ":"))
+  
+  varAD = tibble::tibble(paste(CHROM,
+                               as.numeric(POS) - 1,
+                               POS,
+                               REF,
+                               ALT, sep = ":"),
+                         strsplit(tumour[ADIndex], ",")[[1]][1],
+                         strsplit(tumour[ADIndex], ",")[[1]][2],
+                         strsplit(normal[ADIndex], ",")[[1]][1],
+                         strsplit(normal[ADIndex], ",")[[1]][2],
+                         FILTER
+  ) %>%
+    purrr::set_names(c("ID", "t_ref_count", "t_alt_count", "n_ref_count", "n_alt_count", "FILTERS")) %>%
+    filter((as.numeric(t_alt_count) / (as.numeric(t_ref_count) + as.numeric(t_alt_count))) > 0,
+           (as.numeric(t_alt_count) / (as.numeric(t_ref_count) + as.numeric(t_alt_count))) < 1)
+  
+  
+  return(varAD)
+}
+
+#' Mutect2 VCF small variants parsing function
+#'
+#' @description Parse a small variants VCF file from Mutect2 with information about SNVs and indels
+#'
+#' @param file is Mutect2 small variants vcf file path
+#'
+#' @return Allele depths for normal and tumour
+#' for all PASS autosome SNVs
+#'
+#' @export
+#'
+#' @importFrom  purrr  pmap_dfr dplyr tidyr
+#'
+#' @examples
+#' # not run
+#' \dontrun{
+#'  load_VCF_smallVar_MUTECT2("Myfile.vcf")
+#' }
+load_VCF_smallVar_MUTECT2 = function(file) {
+  
+  
+  if (!file.exists(file))
+    stop("Input file", file, "not found!")
+  
+  cli::cli_h2("Small Variants VCF Mutect2 parser for TINC")
+  
+  # Load vcf and filter to leave PASS SNVs in autosome
+  vcfSmallVar = read.table(file, colClasses = "character")
+  autosome = sprintf("chr%s",seq(1:22))
+  vcfSmallVarFilt = vcfSmallVar %>%
+    dplyr::filter(V1 %in% autosome, nchar(V4) == 1, nchar(V5) == 1, V7 == "PASS")
+  
+  # Pull allele depths from normal and tumour
+  SNVnADtAD <- vcfSmallVarFilt[, c(1, 2, 4, 5, 7, 9, 10, 11)] %>%
+    dplyr::rename_all(~ c("CHROM", "POS", "REF", "ALT", "FILTER", "FORMAT", "tumour", "normal")) %>%
+    purrr::pmap_dfr(., pullAD_MUTECT2) %>%
+    tidyr::separate(ID, into = c('chr', 'from', 'to', 'ref', 'alt'), sep = ':') %>%
+    mutate(from = as.numeric(from), to = as.numeric(to),
+           t_ref_count = as.numeric(t_ref_count), t_alt_count = as.numeric(t_alt_count),
+           n_ref_count = as.numeric(n_ref_count), n_alt_count = as.numeric(n_alt_count)) %>%
+    dplyr::select(-FILTERS)
+  
+  # Report some text
+  cli::cli_alert_success(
+    "Mutect2 variants parsed successfully: n = {.value {nrow(SNVnADtAD)}}"
+  )
+  
+  
+  return(SNVnADtAD)
+}
